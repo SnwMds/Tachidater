@@ -1,17 +1,35 @@
 import json
-import strformat
-import osproc
-import strutils
-import re
-import sequtils
 import net
 import os
+import osproc
+import re
+import sequtils
 import streams
-
-let context: SslContext = newContext()
+import strformat
+import strutils
 
 var
+    address: string
+    apkFile: FileStream
+    body: string
+    chunk: string
+    chunkSize: int
+    exitCode: int
+    headers: string
+    installedVersionName: string
+    installedversionCode: string
+    matches: array[2, string]
+    output: string
+    packageId: string
+    packages: seq[string] = newSeq[string]()
+    response: string
     socket: Socket
+    splitedPackage: seq[string]
+    temporaryFile: string
+
+let
+    context: SslContext = newContext()
+    pattern: Regex = re(r".*versionCode=([0-9]+).+versionName=([0-9\.]+).*", flags = {reDotAll, reMultiLine})
 
 echo "Fetching releases file"
 
@@ -20,15 +38,10 @@ wrapSocket(context, socket)
 
 socket.connect("1.1.1.1", Port(443))
 socket.send(
-    "GET /dns-query?name=raw.githubusercontent.com&type=A HTTP/1.0\r\n" &
-    "Host: cloudflare-dns.com\r\n" &
-    "Accept: application/dns-json\r\n\r\n"
+    "GET /dns-query?name=raw.githubusercontent.com&type=A HTTP/1.0\n" &
+    "Host: cloudflare-dns.com\n" &
+    "Accept: application/dns-json\n\n"
 )
-
-var
-    response: string
-    chunk: string
-    chunkSize: int
 
 response = ""
 
@@ -44,14 +57,9 @@ while true:
 
 socket.close()
 
-var
-    headers, body: string
-
 (headers, body) = response.split("\r\n\r\n", maxsplit = 1)
 
 let dnsAnswer: JsonNode = parseJson(body)
-
-var address: string
 
 for answer in dnsAnswer["Answer"]:
     address = answer["data"].getStr()
@@ -63,8 +71,8 @@ wrapSocket(context, socket)
 
 socket.connect(address, Port(443))
 socket.send(
-    "GET /tachiyomiorg/tachiyomi-extensions/repo/index.min.json HTTP/1.0\r\n" &
-    "Host: raw.githubusercontent.com\r\n\r\n"
+    "GET /tachiyomiorg/tachiyomi-extensions/repo/index.min.json HTTP/1.0\n" &
+    "Host: raw.githubusercontent.com\n\n"
 )
 
 response = ""
@@ -87,28 +95,15 @@ let extensionsData: JsonNode = parseJson(body)
 
 echo "Checking extensions"
 
-var
-    output: string
-    exitCode: int
-
 (output, exitCode) = execCmdEx("pm list packages -3")
 
 if exitCode != 0:
     raise newException(ValueError, "Can't get packages list")
 
-var
-    installedVersionName: string
-    installedversionCode: string
-    matches: array[2, string]
-
-var packages: seq[string] = newSeq[string]()
-
-let pattern: Regex = re(r".*versionCode=([0-9]+).+versionName=([0-9\.]+).*", flags = {reDotAll, reMultiLine})
-
 for package in output.strip().split("\n"):
-    var splitedPackage: seq[string] = package.split(":")
+    splitedPackage = package.split(":")
 
-    var packageId: string = splitedPackage[1]
+    packageId = splitedPackage[1]
 
     if not packageId.startsWith("eu.kanade.tachiyomi.extension"):
         continue
@@ -121,10 +116,6 @@ echo fmt"Found {totalPackages} extensions"
 
 if totalPackages < 1:
     quit(0)
-
-var
-    apkFile: FileStream
-    temporaryFile: string
 
 echo "Checking for updates"
 
@@ -160,8 +151,8 @@ for extension in packages:
                 socket.connect(address, Port(443))
                 socket.send(
                     "GET /tachiyomiorg/tachiyomi-extensions/repo/apk/" & 
-                    extensionData["apk"].getStr() & " HTTP/1.0\r\n" &
-                    "Host: raw.githubusercontent.com\r\n\r\n"
+                    extensionData["apk"].getStr() & " HTTP/1.0\n" &
+                    "Host: raw.githubusercontent.com\n\n"
                 )
 
                 echo fmt"Downloading to {temporaryFile}"
